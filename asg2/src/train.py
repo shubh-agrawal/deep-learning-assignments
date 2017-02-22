@@ -42,12 +42,12 @@ class neuralNetwork(object):
         return outputAct
 
 
-    def gradientDescent(self, all_data, epochs, mini_batch_size, lr, n_test=0):
+    def gradientDescent(self, all_data, epochs, mini_batch_size, lr, n_validation=0):
         ''' Creates validation set, mini_batches and updates weights'''
-        if n_test != 0 :
-            test_data = all_data[:n_test]
+        if n_validation != 0 :
+            validation_data = all_data[:n_validation]
         
-        training_data = all_data[n_test:]    
+        training_data = all_data[n_validation:]    
         n_train = len(training_data)
 
         for j in xrange(epochs):
@@ -55,10 +55,10 @@ class neuralNetwork(object):
             mini_batches = [ training_data[k:k+mini_batch_size] for k in xrange(0, n_train, mini_batch_size)]
             for mini_batch in mini_batches:
                 self.update_mini_batch(mini_batch, lr)
-            if n_test !=0:
-                print "Epochs {0}: {1}%".format(j, self.evaluate(test_data))
+            if n_validation !=0:
+                print "Epochs {0}: Training: {1:.2f}% | Validation: {2:.2f}%".format(j, self.evaluate(training_data), self.evaluate(validation_data))
             else:
-                print "Epoch {0} complete".format(j)
+                print "Epoch {0}: Training: {1:.2f}% accuracy".format(j, self.evaluate(training_data))
 
 
     def update_mini_batch(self, mini_batch, lr):
@@ -132,7 +132,7 @@ def train(trainX, trainY):
     
     #define net and training rule
     nNet = neuralNetwork([784, 50, 10])                           # 50 neurons in hidden layer # To fine tune the weights, add 1 as second arguement
-    nNet.gradientDescent(training_data, 40, 10, 2.5, n_validation) # (epochs = 30, mini_batch_size = 10, Lr = 3.0)
+    nNet.gradientDescent(training_data, 35, 10, 2.25, n_validation) # (epochs = 35, mini_batch_size = 10, Lr = 2.25)
     
     np.save("weights/weights.npy", nNet.weights)
     np.save("weights/biases.npy", nNet.biases)            
