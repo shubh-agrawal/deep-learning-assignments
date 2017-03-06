@@ -21,6 +21,8 @@ import gzip
 import os
 import csv
 import numpy as np
+import itertools, random
+import tensorflow as tf
 from scipy.spatial.distance import cosine
 
 ## paths to files. Do not change this
@@ -61,19 +63,70 @@ def vectorExtract(simD = simDataset, anaD = analogyDataset, vect = vectorgzipFil
     print 'retrieved', len(wordDict.keys())
     return wordDict
 
-# Extracting Vectors from Analogy and Similarity Dataset
+# Extracting Vectors from Analogy and Similarity testing dataset
 validateVectors = vectorExtract()
-
 
 # In[ ]:
 
 # Dictionary of training pairs for the analogy task
 trainDict = dict()
+analogyWordList = []
 for subDirs in os.listdir(analogyTrainPath):
     for files in os.listdir(analogyTrainPath+subDirs+'/'):
         f = open(analogyTrainPath+subDirs+'/'+files).read().splitlines()
-        trainDict[files] = f
+        f_tuples = [x.split('\t') for x in f]
+        trainDict[files] = f_tuples
+        analogyWordList = analogyWordList + [word for pair in f_tuples for word in pair]
 print len(trainDict.keys())
+print len(analogyWordList)
+
+
+if not os.path.exists(os.path.join(os.getcwd(), "analogyWordVecDict.npy")):
+	analogyWordVecDict = dict()
+	vectorFile = open(vectorTxtFile, 'r')
+	for line in vectorFile:
+		if line.split()[0].strip() in analogyWordList:
+			analogyWordVecDict[line.split()[0].strip()] = line.split()[1:]
+	print len(analogyWordVecDict.keys())
+	np.save("analogyWordVecDict.npy", analogyWordVecDict)
+else:
+	analogyWordVecDict = np.load("analogyWordVecDict.npy").item()
+	print len(analogyWordVecDict.keys())
+
+
+if not os.path.exists(os.path.join(os.getcwd(), "trainWordVecDict.npy")):
+	trainWordVecDict = dict()
+	tempList = []
+	for pairClass, pairs in zip(trainDict.keys(), trainDict.values()):
+		for pair in pairs:
+			if (pair[0] in analogyWordVecDict.keys()) and (pair[1] in analogyWordVecDict.keys()):
+				#tempList.append([ [pair[0], analogyWordVecDict[pair[0]]], [pair[1], analogyWordVecDict[pair[1]]] ])
+				tempList.append(np.array(analogyWordVecDict[pair[0]]).astype(np.float32) - np.array(analogyWordVecDict[pair[1]]).astype(np.float32))
+		trainWordVecDict[pairClass] = tempList
+	print len(trainWordVecDict.keys())
+	np.save("trainWordVecDict.npy", trainWordVecDict)
+else:
+	trainWordVecDict = np.load("trainWordVecDict.npy").item()
+	print len(trainWordVecDict.keys())	
+#print trainWordVecDict
+
+positiveSamples = []
+for pairClass in trainWordVecDict.keys():
+	positiveSamples = positiveSamples + [x for x in itertools.combinations(trainWordVecDict[pairClass][:100], 2)]
+positiveSamples = [ (np.append(x[0], x[1]), np.array([1.0, 0.0])) for x in positiveSamples]
+print len(positiveSamples)
+#print positiveSamples[5]
+
+negativeSamples = []
+for i in range(0, len(trainWordVecDict.keys()) - 1):
+	negativeSamples = negativeSamples + list(itertools.product(trainWordVecDict.values()[i][:80], trainWordVecDict.values()[i+1][:80]))
+negativeSamples = [ (np.append(x[0], x[1]), np.array([0.0, 1.0])) for x in negativeSamples]
+print len(negativeSamples)
+#print negativeSamples[5]
+
+syntheticData = positiveSamples + negativeSamples
+syntheticData = random.sample(syntheticData, len(syntheticData))
+print len(syntheticData)
 
 
 # In[58]:
@@ -151,7 +204,72 @@ def similarityTask(inputDS = simDataset, outputFile = simOutputFile, summaryFile
 
 # In[ ]:
 
-def analogyTask(inputDS=analogyDataset,outputFile = anaSoln ): # add more arguments if required
+def weight_variable(shape):
+	initial = tf.truncated_normal(shape, stddev=0.1)
+	return tf.Variable(initial)
+
+def bias_variable(shape):
+	initial = tf.constant(0.1, shape=shape)
+	return tf.Variable(initial)
+
+def separation(shuffled_dataset, n_validate = 0):
+	
+	trainData = shuffled_dataset[n_validate:]
+	validData = shuffled_dataset[:n_validate]
+
+	return trainData, validData	
+
+def network_model(x_image):
+
+	w1 = weight_variable([600, 100])
+	b1 = bias_variable([100])
+
+	
+	h1 = tf.matmul(x_image, w1) + b1
+	
+	w2 = weight_variable([100, 2])
+	b2 = bias_variable([2])
+
+	y_output = tf.matmul(h1, w2) + b2
+
+	return y_output
+
+def analogyTask(inputDS=analogyDataset,outputFile = anaSoln, dataset= syntheticData ): # add more arguments if required
+
+
+
+	trainData, validData = separation(dataset, 20000)
+
+	sess = tf.Session()
+
+	x_image = tf.placeholder(tf.float32, [None, 600])
+	y_target = tf.placeholder(tf.float32, [None, 2])
+
+	y_output = network_model(x_image)
+	loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(y_output, y_target))
+	train_step = tf.train.AdamOptimizer(0.8).minimize(loss)
+	
+	correct_prediction = tf.equal(tf.argmax(y_output,1), tf.argmax(y_target,1))
+	accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+
+#Test accuracy here. Considering number of options as classes
+
+	minibatch = 1000
+	sess.run(tf.initialize_all_variables())
+
+	for epoch in range(30):
+		trainData = random.sample(trainData, len(trainData))
+
+		for k in xrange(0, len(trainData), minibatch):	
+			batch_input, batch_output = [ x[0] for x in trainData[k: k + minibatch] ], [ x[1] for x in trainData[k : k + minibatch] ] 
+			sess.run(train_step, feed_dict = {x_image: batch_input, y_target: batch_output })
+
+
+		valid_input, valid_output = [ x[0] for x in validData ], [ x[1] for x in validData ]
+		valid_accuracy = sess.run(accuracy, feed_dict={x_image: valid_input, y_target: valid_output})
+		print "epoch %d, validation accuracy %g"%(epoch, valid_accuracy)
+
+	#print "test accuracy %g"%(sess.run(accuracy, feed_dict={x_image: test_tensor, target: test_labels, h_fc1_prob: 1.0}))
 
 	"""
 	Output a file, analogySolution.csv with the following entris
@@ -159,7 +277,7 @@ def analogyTask(inputDS=analogyDataset,outputFile = anaSoln ): # add more argume
 	"""
 
 
-	return accuracy #return the accuracy of your model after 5 fold cross validation
+	return valid_accuracy #return the accuracy of your model after 5 fold cross validation
 
 
 
