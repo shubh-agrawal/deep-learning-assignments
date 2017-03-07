@@ -43,11 +43,11 @@ Q4List = "Q4/wordList.csv"
 simDataset = [item.split(" | ") for item in open(simInputFile).read().splitlines()] 
 # creates a list of list
 # Analogy dataset
-analogyDataset = [[stuff.strip() for stuff in item.strip('\n').split('\n')] for item in open(analogyInputFile).read().split('\n\n')]
+analogyWordDataset = [[stuff.strip() for stuff in item.strip('\n').split('\n')] for item in open(analogyInputFile).read().split('\n\n')]
 
-def vectorExtract(simD = simDataset, anaD = analogyDataset, vect = vectorgzipFile):
+def vectorExtract(simD = simDataset, anaD = analogyWordDataset, vect = vectorgzipFile):
     simList = [stuff for item in simD for stuff in item]
-    analogyList = [thing for item in anaD for stuff in item[0:4] for thing in stuff.split()]
+    analogyList = [thing for item in anaD for stuff in item[0:6] for thing in stuff.split()]
     simList.extend(analogyList)
     wordList = set(simList)
     print len(wordList)
@@ -56,7 +56,7 @@ def vectorExtract(simD = simDataset, anaD = analogyDataset, vect = vectorgzipFil
     vectorFile = gzip.open(vect, 'r')
     for line in vectorFile:
         if line.split()[0].strip() in wordList:
-            wordDict[line.split()[0].strip()] = line.split()[1:]
+            wordDict[line.split()[0].strip()] = np.array(line.split()[1:]).astype(np.float32)
     
     
     vectorFile.close()
@@ -65,8 +65,35 @@ def vectorExtract(simD = simDataset, anaD = analogyDataset, vect = vectorgzipFil
 
 # Extracting Vectors from Analogy and Similarity testing dataset
 validateVectors = vectorExtract()
+#print analogyDataset
 
 # In[ ]:
+
+# filtering analogyDataset only for questions with valid word vecs
+tempList=[]
+tempAnalogyDataset = []
+options = ['a', 'b', 'c', 'd', 'e']
+analogyLabels=[]
+tempanalogyWordDataset = []
+for block in analogyWordDataset:
+	for line in block[:6]:
+		wordPair = line.split()
+		if wordPair[0] in validateVectors.keys() and wordPair[1] in validateVectors.keys():
+			tempList.append(validateVectors[wordPair[0]] - validateVectors[wordPair[1]])
+		else:
+			tempList=[]
+			break
+	if len(tempList) != 0:			
+		tempAnalogyDataset.append(tempList)
+		analogyLabels.append(options.index(block[6]))
+		tempanalogyWordDataset.append(block)
+	tempList = []		
+
+analogyLabels = np.array(analogyLabels).astype(np.int)
+analogyDataset = tempAnalogyDataset
+analogyWordDataset = tempanalogyWordDataset
+print len(analogyDataset) 
+
 
 # Dictionary of training pairs for the analogy task
 trainDict = dict()
@@ -103,6 +130,7 @@ if not os.path.exists(os.path.join(os.getcwd(), "trainWordVecDict.npy")):
 				#tempList.append([ [pair[0], analogyWordVecDict[pair[0]]], [pair[1], analogyWordVecDict[pair[1]]] ])
 				tempList.append(np.array(analogyWordVecDict[pair[0]]).astype(np.float32) - np.array(analogyWordVecDict[pair[1]]).astype(np.float32))
 		trainWordVecDict[pairClass] = tempList
+		tempList = []
 	print len(trainWordVecDict.keys())
 	np.save("trainWordVecDict.npy", trainWordVecDict)
 else:
@@ -112,14 +140,14 @@ else:
 
 positiveSamples = []
 for pairClass in trainWordVecDict.keys():
-	positiveSamples = positiveSamples + [x for x in itertools.combinations(trainWordVecDict[pairClass][:100], 2)]
+	positiveSamples = positiveSamples + [x for x in itertools.combinations(trainWordVecDict[pairClass][:120], 2)]
 positiveSamples = [ (np.append(x[0], x[1]), np.array([1.0, 0.0])) for x in positiveSamples]
 print len(positiveSamples)
 #print positiveSamples[5]
 
 negativeSamples = []
 for i in range(0, len(trainWordVecDict.keys()) - 1):
-	negativeSamples = negativeSamples + list(itertools.product(trainWordVecDict.values()[i][:80], trainWordVecDict.values()[i+1][:80]))
+	negativeSamples = negativeSamples + list(itertools.product(trainWordVecDict.values()[i][:100], trainWordVecDict.values()[i+1][:100]))
 negativeSamples = [ (np.append(x[0], x[1]), np.array([0.0, 1.0])) for x in negativeSamples]
 print len(negativeSamples)
 #print negativeSamples[5]
@@ -155,6 +183,11 @@ def similarityTask(inputDS = simDataset, outputFile = simOutputFile, summaryFile
 	euclideanAnsList = []
 	manhattenAnsList = []
 	cosineAnsList = []
+
+	euclideanMRR = 0.0
+	manhattenMRR = 0.0
+	cosineMRR = 0.0
+	
 	validCount = 0
 
 	f1 = open(simOutputFile, "wb")
@@ -184,6 +217,10 @@ def similarityTask(inputDS = simDataset, outputFile = simOutputFile, summaryFile
 			manhattenAnsList.append(choiceWordList[index][np.argmin(mtempDistList)])
 			cosineAnsList.append(choiceWordList[index][np.argmin(ctempDistList)])
 
+			euclideanMRR = euclideanMRR + 1.0/(np.argmin(etempDistList) + 1.0)
+			manhattenMRR = manhattenMRR + 1.0/(np.argmin(mtempDistList) + 1.0)
+			cosineMRR = cosineMRR + 1.0/(np.argmin(ctempDistList) + 1.0)
+
 			validCount = validCount + 1
 
 		else:
@@ -194,9 +231,9 @@ def similarityTask(inputDS = simDataset, outputFile = simOutputFile, summaryFile
 	f2 = open(simSummaryFile, "wb")		
 	csvwriter = csv.writer(f2, delimiter = ',', quotechar = '|', quoting = csv.QUOTE_MINIMAL)
 
-	csvwriter.writerow(['E', len(set(euclideanAnsList) & set(ansWordList)), validCount])
-	csvwriter.writerow(['M', len(set(manhattenAnsList) & set(ansWordList)), validCount])
-	csvwriter.writerow(['C', len(set(cosineAnsList) & set(ansWordList)), validCount])
+	csvwriter.writerow(['E', len(set(euclideanAnsList) & set(ansWordList)), validCount, float(euclideanMRR/validCount)])
+	csvwriter.writerow(['M', len(set(manhattenAnsList) & set(ansWordList)), validCount, float(manhattenMRR/validCount)])
+	csvwriter.writerow(['C', len(set(cosineAnsList) & set(ansWordList)), validCount, float(cosineMRR/validCount)])
 		
 	f2.close()
 
@@ -219,65 +256,97 @@ def separation(shuffled_dataset, n_validate = 0):
 
 	return trainData, validData	
 
-def network_model(x_image):
 
-	w1 = weight_variable([600, 100])
-	b1 = bias_variable([100])
-
-	
-	h1 = tf.matmul(x_image, w1) + b1
-	
-	w2 = weight_variable([100, 2])
-	b2 = bias_variable([2])
-
-	y_output = tf.matmul(h1, w2) + b2
-
-	return y_output
-
-def analogyTask(inputDS=analogyDataset,outputFile = anaSoln, dataset= syntheticData ): # add more arguments if required
+def analogyTask(inputDS1=analogyDataset, inputDS2=analogyWordDataset, inputlabels = analogyLabels, outputFile = anaSoln, dataset= syntheticData ): # add more arguments if required
 
 
 
-	trainData, validData = separation(dataset, 20000)
+	#trainData, validData = separation(dataset, 20000)
 
-	sess = tf.Session()
+	sess = tf.InteractiveSession()
 
 	x_image = tf.placeholder(tf.float32, [None, 600])
 	y_target = tf.placeholder(tf.float32, [None, 2])
 
-	y_output = network_model(x_image)
+	w1 = weight_variable([600, 200])
+	b1 = bias_variable([200])
+
+	
+	h1 = tf.matmul(x_image, w1) + b1
+	
+	w2 = weight_variable([200, 2])
+	b2 = bias_variable([2])
+
+	y_output = tf.matmul(h1, w2) + b2
+
 	loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(y_output, y_target))
 	train_step = tf.train.AdamOptimizer(0.8).minimize(loss)
 	
 	correct_prediction = tf.equal(tf.argmax(y_output,1), tf.argmax(y_target,1))
 	accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
-#Test accuracy here. Considering number of options as classes
+	test_output = tf.nn.softmax(y_output)
 
 	minibatch = 1000
+	crossValidAcc = 0.0
 	sess.run(tf.initialize_all_variables())
 
-	for epoch in range(30):
-		trainData = random.sample(trainData, len(trainData))
 
-		for k in xrange(0, len(trainData), minibatch):	
-			batch_input, batch_output = [ x[0] for x in trainData[k: k + minibatch] ], [ x[1] for x in trainData[k : k + minibatch] ] 
-			sess.run(train_step, feed_dict = {x_image: batch_input, y_target: batch_output })
+	print "5 Fold cross validation"
+
+	for i in range(0, len(syntheticData) - len(syntheticData)%5, len(syntheticData)/5):
+		validData = syntheticData[i: i + len(syntheticData)/5]
+		trainData = syntheticData[0:i] + syntheticData[i + len(syntheticData)/5: len(syntheticData)]
+
+		for epoch in range(10):
+			trainData = random.sample(trainData, len(trainData))
+
+			for k in xrange(0, len(trainData), minibatch):	
+				batch_input, batch_output = [ x[0] for x in trainData[k: k + minibatch] ], [ x[1] for x in trainData[k : k + minibatch] ] 
+				sess.run(train_step, feed_dict = {x_image: batch_input, y_target: batch_output })
 
 
-		valid_input, valid_output = [ x[0] for x in validData ], [ x[1] for x in validData ]
-		valid_accuracy = sess.run(accuracy, feed_dict={x_image: valid_input, y_target: valid_output})
-		print "epoch %d, validation accuracy %g"%(epoch, valid_accuracy)
+			valid_input, valid_output = [ x[0] for x in validData ], [ x[1] for x in validData ]
+			valid_accuracy = sess.run(accuracy, feed_dict={x_image: valid_input, y_target: valid_output})
+			print "epoch %d, validation accuracy %g"%(epoch, valid_accuracy)
 
-	#print "test accuracy %g"%(sess.run(accuracy, feed_dict={x_image: test_tensor, target: test_labels, h_fc1_prob: 1.0}))
+		crossValidAcc = crossValidAcc + sess.run(accuracy, feed_dict={x_image: valid_input, y_target: valid_output})
+		
+
+	#Test graph
+
+	blockInput = []
+	choiceOutput = []
+	for i in range(0, len(analogyDataset)):
+		for j in range(1, 6):
+			blockInput.append(np.append(analogyDataset[i][0], analogyDataset[i][j]))		
+
+		print sess.run(y_output, feed_dict={x_image: blockInput})	
+		probPositive = [x[0] for x in sess.run(y_output, feed_dict={x_image: blockInput})]
+		choiceOutput.append(np.argmax(probPositive))
+		blockInput = []
+
+	print choiceOutput
+	correct_test = np.equal(np.array(choiceOutput).astype(np.int), np.array(analogyLabels).astype(np.int))
+	test_accuracy = np.mean(correct_test)
+	print test_accuracy
+
+	f = open(anaSoln, "wb")
+	csvwriter = csv.writer(f, delimiter = ',', quotechar = '|', quoting = csv.QUOTE_MINIMAL)
+	
+	for i in range(len(analogyWordDataset)):
+		csvwriter.writerow([analogyWordDataset[i][0], analogyWordDataset[i][analogyLabels[i] + 1], analogyWordDataset[i][choiceOutput[i] + 1] ])
+	f.close()	
+
+
 
 	"""
 	Output a file, analogySolution.csv with the following entris
 	Query word pair, Correct option, predicted option    
 	"""
 
-
-	return valid_accuracy #return the accuracy of your model after 5 fold cross validation
+	print "Accuracy after 5 fold cross validation: ", crossValidAcc/5.0 
+	return crossValidAcc/5.0 #valid_accuracy #return the accuracy of your model after 5 fold cross validation
 
 
 
@@ -319,9 +388,10 @@ def derivedWOrdTask(inputFile = Q4List):
 # In[ ]:
 
 def main():
-    #similarityTask()
-    anaSim = analogyTask()
-    #derCos1,derCos2 = derivedWordTask
+	similarityTask()
+	anaSim = analogyTask()
+	#derCos1,derCos2 = derivedWordTask
+	print "Hello"
 
 if __name__ == '__main__':
-    main()
+	main()
