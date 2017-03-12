@@ -154,7 +154,7 @@ print len(negativeSamples)
 
 syntheticData = positiveSamples + negativeSamples
 syntheticData = random.sample(syntheticData, len(syntheticData))
-print len(syntheticData)
+print "Total synthetic data produced: ", len(syntheticData)
 
 
 # In[58]:
@@ -287,16 +287,18 @@ def analogyTask(inputDS1=analogyDataset, inputDS2=analogyWordDataset, inputlabel
 
 	test_output = tf.nn.softmax(y_output)
 
-	minibatch = 1000
+	minibatch = 200
 	crossValidAcc = 0.0
 	sess.run(tf.initialize_all_variables())
 
 
 	print "5 Fold cross validation"
 
-	for i in range(0, len(syntheticData) - len(syntheticData)%5, len(syntheticData)/5):
+	for i in range(0, len(syntheticData), len(syntheticData)/5 + 1):
 		validData = syntheticData[i: i + len(syntheticData)/5]
 		trainData = syntheticData[0:i] + syntheticData[i + len(syntheticData)/5: len(syntheticData)]
+
+		print "Cross-Validation #%d"%(i*5/len(syntheticData) + 1)
 
 		for epoch in range(10):
 			trainData = random.sample(trainData, len(trainData))
@@ -321,15 +323,15 @@ def analogyTask(inputDS1=analogyDataset, inputDS2=analogyWordDataset, inputlabel
 		for j in range(1, 6):
 			blockInput.append(np.append(analogyDataset[i][0], analogyDataset[i][j]))		
 
-		print sess.run(y_output, feed_dict={x_image: blockInput})	
+		#print sess.run(y_output, feed_dict={x_image: blockInput})	
 		probPositive = [x[0] for x in sess.run(y_output, feed_dict={x_image: blockInput})]
 		choiceOutput.append(np.argmax(probPositive))
 		blockInput = []
 
-	print choiceOutput
+	#print choiceOutput
 	correct_test = np.equal(np.array(choiceOutput).astype(np.int), np.array(analogyLabels).astype(np.int))
 	test_accuracy = np.mean(correct_test)
-	print test_accuracy
+	print "Test accuracy on word-analogy-dataset: ", test_accuracy
 
 	f = open(anaSoln, "wb")
 	csvwriter = csv.writer(f, delimiter = ',', quotechar = '|', quoting = csv.QUOTE_MINIMAL)

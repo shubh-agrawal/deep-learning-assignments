@@ -132,7 +132,7 @@ def train(trainX, trainY):
     
     #define net and training rule
     nNet = neuralNetwork([784, 50, 10])                           # 50 neurons in hidden layer # To fine tune the weights, add 1 as second arguement
-    nNet.gradientDescent(training_data, 35, 10, 2.25, n_validation) # (epochs = 35, mini_batch_size = 10, Lr = 2.25)
+    nNet.gradientDescent(training_data, 20, 10, 2.25, n_validation) # (epochs = 35, mini_batch_size = 10, Lr = 2.25)
     
     np.save("weights/weights.npy", nNet.weights)
     np.save("weights/biases.npy", nNet.biases)            
